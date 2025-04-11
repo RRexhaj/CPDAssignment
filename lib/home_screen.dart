@@ -4,6 +4,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -18,13 +20,16 @@ class _HomeScreenState extends State<HomeScreen> {
       FlutterLocalNotificationsPlugin();
   String _location = '';
   LatLng? _currentLatLng; // Store the current location for the map
+  GoogleMapController? _mapController; // Controller for Google Map
 
   @override
   void initState() {
     super.initState();
     _initializeNotifications();
+    _requestNotificationPermission(); // Request notification permission for Android 13+
   }
 
+  // Initialize the notification plugin
   Future<void> _initializeNotifications() async {
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -33,15 +38,33 @@ class _HomeScreenState extends State<HomeScreen> {
     await _notificationsPlugin.initialize(initializationSettings);
   }
 
-  Future<void> _sendNotification(String message) async {
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails('channel_id', 'channel_name',
-            importance: Importance.high, priority: Priority.high);
-    const NotificationDetails notificationDetails =
-        NotificationDetails(android: androidDetails);
-    await _notificationsPlugin.show(0, 'Location Tracker', message, notificationDetails);
+  // Request notification permission for Android 13+
+  Future<void> _requestNotificationPermission() async {
+    if (await Permission.notification.isDenied) {
+      await Permission.notification.request();
+    }
   }
 
+  // Send a notification
+  Future<void> _sendNotification(String message) async {
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+      'channel_id', // Unique channel ID
+      'Location Updates', // Channel name
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+    const NotificationDetails notificationDetails =
+        NotificationDetails(android: androidDetails);
+    await _notificationsPlugin.show(
+      0, // Notification ID
+      'Location Tracker', // Notification title
+      message, // Notification body
+      notificationDetails,
+    );
+  }
+
+  // Fetch the current location
   Future<void> _getCurrentLocation() async {
     try {
       // Check if location services are enabled
@@ -86,6 +109,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
       await FirebaseDatabase.instance.ref("locations").push().set(location);
 
+      // Log the event to Firebase Analytics
+      await FirebaseAnalytics.instance.logEvent(
+        name: 'location_fetched',
+        parameters: {
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+        },
+      );
+
       // Update the UI
       setState(() {
         _location = 'Latitude: ${position.latitude}, Longitude: ${position.longitude}';
@@ -98,6 +130,20 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _location = 'Failed to get location: $e';
       });
+    }
+  }
+
+  // Zoom in the map
+  void _zoomIn() {
+    if (_mapController != null) {
+      _mapController!.animateCamera(CameraUpdate.zoomIn());
+    }
+  }
+
+  // Zoom out the map
+  void _zoomOut() {
+    if (_mapController != null) {
+      _mapController!.animateCamera(CameraUpdate.zoomOut());
     }
   }
 
@@ -124,6 +170,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   },
                   zoomControlsEnabled: false, // Disable default zoom controls
+                  onMapCreated: (controller) {
+                    _mapController = controller; // Assign the map controller
+                  },
                 ),
           Positioned(
             bottom: 100,
@@ -131,9 +180,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               children: [
                 ElevatedButton(
-                  onPressed: () {
-                    // Increase zoom level
-                  },
+                  onPressed: _zoomIn,
                   child: const Icon(Icons.add),
                   style: ElevatedButton.styleFrom(
                     minimumSize: const Size(48, 48), // Larger touch target
@@ -141,9 +188,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 10),
                 ElevatedButton(
-                  onPressed: () {
-                    // Decrease zoom level
-                  },
+                  onPressed: _zoomOut,
                   child: const Icon(Icons.remove),
                   style: ElevatedButton.styleFrom(
                     minimumSize: const Size(48, 48), // Larger touch target
@@ -182,6 +227,38 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class ResponsiveScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Responsive Screen'),
+      ),
+      body: Center(
+        child: screenWidth < 600
+            ? Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Text('Small Screen Layout', style: TextStyle(fontSize: 18)),
+                  SizedBox(height: 20),
+                  Icon(Icons.phone_android, size: 50),
+                ],
+              )
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Text('Large Screen Layout', style: TextStyle(fontSize: 24)),
+                  SizedBox(width: 20),
+                  Icon(Icons.desktop_windows, size: 50),
+                ],
+              ),
       ),
     );
   }
